@@ -111,8 +111,12 @@ class LambdaHandler(object):
                 try:
                     from ctypes import cdll, util
                     for library in included_libraries:
+                        if library.startswith('s3://'):
+                            library_path = self.load_remote_library(library)
+                        else:
+                            library_path = os.path.join(os.getcwd(), library)
                         try:
-                            cdll.LoadLibrary(os.path.join(os.getcwd(), library))
+                            cdll.LoadLibrary(library_path)
                         except OSError:
                             print ("Failed to find library...right filename?")
                 except ImportError:
@@ -172,6 +176,26 @@ class LambdaHandler(object):
         # Related: https://github.com/Miserlou/Zappa/issues/702
         os.chdir(project_folder)
         return True
+
+    def load_remote_library(self, lib_path):
+        """
+        Load prebuilt library from S3
+        """
+        remote_bucket, remote_path = parse_s3_url(lib_path)
+        _, lib_name = os.path.split(remote_path)
+        local_lib_path = os.path.join('/tmp/lib', lib_name)
+        logger.info('loading lib: {}, {}, {}'.format(remote_bucket, lib_name, remote_path))
+        if not os.path.isfile(local_lib_path):
+            logger.info('loading from s3')
+            if not self.session:
+                boto_session = boto3.Session()
+            else:
+                boto_session = self.session
+
+            s3 = boto_session.resource('s3')
+            s3.Bucket(remote_bucket).download_file(remote_path, local_lib_path)
+        return local_lib_path
+
 
     def load_remote_settings(self, remote_bucket, remote_file):
         """
